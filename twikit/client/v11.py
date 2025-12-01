@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
     ClientType = Client | GuestClient
 
-from ..constants import DOMAIN
+from ..constants import DOMAIN, TOKEN
 
 class Endpoint:
     GUEST_ACTIVATE = f'https://api.{DOMAIN}/1.1/guest/activate.json'
@@ -80,7 +80,7 @@ class V11Client:
 
         headers = {
             'x-guest-token': guest_token,
-            'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
+            'Authorization': f'Bearer {TOKEN}'
         }
 
         if self.base._get_csrf_token():
