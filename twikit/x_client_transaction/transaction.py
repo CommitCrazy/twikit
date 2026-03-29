@@ -14,6 +14,8 @@ from .utils import float_to_hex, is_odd, base64_encode, handle_x_migration
 
 ON_DEMAND_FILE_REGEX = re.compile(
     r"""['|\"]{1}ondemand\.s['|\"]{1}:\s*['|\"]{1}([\w]*)['|\"]{1}""", flags=(re.VERBOSE | re.MULTILINE))
+ON_DEMAND_CHUNK_ID_REGEX = re.compile(
+    r"""(\d+):\s*['|\"]{1}ondemand\.s['|\"]{1}""", flags=(re.VERBOSE | re.MULTILINE))
 INDICES_REGEX = re.compile(
     r"""(\(\w{1}\[(\d{1,2})\],\s*16\))+""", flags=(re.VERBOSE | re.MULTILINE))
 
@@ -31,20 +33,39 @@ class ClientTransaction:
         home_page_response = await handle_x_migration(session, headers)
 
         self.home_page_response = self.validate_response(home_page_response)
-        self.DEFAULT_ROW_INDEX, self.DEFAULT_KEY_BYTES_INDICES = await self.get_indices(
-            self.home_page_response, session, headers)
-        self.key = self.get_key(response=self.home_page_response)
-        self.key_bytes = self.get_key_bytes(key=self.key)
-        self.animation_key = self.get_animation_key(
-            key_bytes=self.key_bytes, response=self.home_page_response)
+        try:
+            self.DEFAULT_ROW_INDEX, self.DEFAULT_KEY_BYTES_INDICES = await self.get_indices(
+                self.home_page_response, session, headers)
+            self.key = self.get_key(response=self.home_page_response)
+            self.key_bytes = self.get_key_bytes(key=self.key)
+            self.animation_key = self.get_animation_key(
+                key_bytes=self.key_bytes, response=self.home_page_response)
+        except Exception:
+            self.home_page_response = None
+            raise
 
     async def get_indices(self, home_page_response, session, headers):
         key_byte_indices = []
         response = self.validate_response(
             home_page_response) or self.home_page_response
-        on_demand_file = ON_DEMAND_FILE_REGEX.search(str(response))
+        page_text = str(response)
+        on_demand_hash = None
+
+        # Try legacy format first: "ondemand.s": "hashValue"
+        on_demand_file = ON_DEMAND_FILE_REGEX.search(page_text)
         if on_demand_file:
-            on_demand_file_url = f"https://abs.twimg.com/responsive-web/client-web/ondemand.s.{on_demand_file.group(1)}a.js"
+            on_demand_hash = on_demand_file.group(1)
+        else:
+            # New webpack format: chunkId:"ondemand.s" with separate hash mapping chunkId:"hash"
+            chunk_id_match = ON_DEMAND_CHUNK_ID_REGEX.search(page_text)
+            if chunk_id_match:
+                chunk_id = chunk_id_match.group(1)
+                hash_match = re.search(rf'{chunk_id}:"([a-f0-9]{{7,10}})"', page_text)
+                if hash_match:
+                    on_demand_hash = hash_match.group(1)
+
+        if on_demand_hash:
+            on_demand_file_url = f"https://abs.twimg.com/responsive-web/client-web/ondemand.s.{on_demand_hash}a.js"
             on_demand_file_response = await session.request(method="GET", url=on_demand_file_url, headers=headers)
             key_byte_indices_match = INDICES_REGEX.finditer(
                 str(on_demand_file_response.text))
